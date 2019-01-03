@@ -1,0 +1,270 @@
+---
+title: "Figures_to_Journal_Specifications"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+You've made a great graph, or you have some exciting data, and you want to create a clear, informative graph, that is accessible to everyone and is up to the specifications of the journal you are submitting to. 
+
+Porzana Solutions can help. 
+
+I can ensure that your figure is accessible to those with colorblindness, or the legally blind. 
+
+I can write screen reader captions for your figures so that those who use screen readers can still use and understand your figures. 
+
+I do most of my graphing in ggplot2, and with this R package can make a figure to your exact specifications. 
+
+
+```{r, message=FALSE, warning=FALSE}
+
+library(ggplot2)
+library(gridExtra)
+library(auriel)
+library(raildata)
+library(chron)
+library(cowplot)
+library(ResourceSelection)
+library(tidyverse)
+library(raildata)
+library(RColorBrewer)
+```
+
+```{r, fig.height=8, fig.width=8}
+states <- c("missouri","illinois","ohio","indiana","kentucky")
+
+####
+# Missouri Surveys
+####
+
+data(allbirds)
+
+allbirds <- allbirds %>%
+                mutate(species=ifelse(species=="y"|species=="yera",
+                                      "Yellow Rail",species),
+                       species=ifelse(species=="v"|species=="vira",
+                                      "Virginia Rail",species)) %>%
+                filter(species=="Yellow Rail"|species=="Virginia Rail") %>%
+                mutate(state="missouri",
+                       source="This Study") %>%
+                select(species, state, month, day, year, source, odate)
+
+#####
+## Building Strikes
+####
+
+nonebird <- read.csv("./data/no_ebird.csv", 
+                     stringsAsFactors = FALSE) %>%
+              mutate(spp=ifelse(spp=="yera","Yellow Rail",spp),
+                     spp=ifelse(spp=="vira","Virginia Rail",spp),
+                     source=ifelse(source=="birdstrikes",
+                                   "Building Strikes",source)) %>%
+              filter(spp!="sora",
+                     !is.na(spp),
+                     state %in% states,
+                     state !="illinois",
+                     year>=1960,
+                     month>=8&month<=11)
+
+
+####
+## Bluebird
+####
+
+bluebird <- read.csv("./data/the_bluebird.csv", 
+                        stringsAsFactors = FALSE) %>%
+                  mutate(state="missouri",
+                         source="The Bluebird") %>%
+                  filter(!is.na(day))
+
+bluebird[bluebird$month=="august",]$month <- 8
+bluebird[bluebird$month=="june",]$month <- 6
+bluebird[bluebird$month=="december",]$month <- 12
+bluebird[bluebird$month=="August",]$month <- 8
+bluebird[bluebird$month=="May",]$month <- 5
+bluebird[bluebird$month=="september",]$month <- 9
+bluebird[bluebird$month=="october",]$month <- 10
+bluebird[bluebird$month=="april",]$month <- 4
+bluebird[bluebird$month=="march",]$month <- 3
+bluebird[bluebird$month=="july",]$month <- 7
+bluebird[bluebird$month=="november",]$month <- 11
+bluebird[bluebird$month=="may",]$month <- 5
+
+bluebird$odate <- ordinal_date_con(bluebird[,c("month","day","year")])
+
+bbird <- bluebird %>% 
+  mutate(species = ifelse(species=="year"|species=="yera",
+                          "Yellow Rail",species),
+         species = ifelse(species=="vira","Virginia Rail",species),
+         month = as.numeric(month)) %>%
+  filter(species=="Virginia Rail"|species=="Yellow Rail", 
+         month>=8&month<=11) %>% 
+  select(species, state, month, day, year, source, odate)
+
+####
+# eBird
+####
+
+vira <- c("Virginia Rail","vira")
+yera <- c("Yellow Rail", "yera","year")
+sora <- c("Sora","sora")
+
+dat <- read.csv("./data/ebird.csv", stringsAsFactors = FALSE) %>%
+          mutate(source="eBird",
+                 species = ifelse(species %in% vira, 
+                                  "Virginia Rail", species),
+                 species = ifelse(species %in% yera, 
+                                  "Yellow Rail", species)) %>%
+          filter(species=="Virginia Rail"|species=="Yellow Rail",
+                 year>=2000,
+                 latitude<=40.5&latitude>36.5&state %in% states,
+                 month>=8&month<=11) %>%
+          select(species, state, month, day, year, source, odate)
+
+###
+# bring everything together
+###
+
+colnames(allbirds) <- colnames(nonebird)
+colnames(bbird) <- colnames(nonebird)
+colnames(dat) <- colnames(nonebird)
+
+alldat <- bind_rows(dat,nonebird, allbirds, bbird) %>%
+          filter(source!="vertnet",
+                 odate>=213) %>%
+          mutate(date=paste0(month,"/",day,"/",year),
+                 date=as.Date(date, format="%m/%d/%y")) %>%
+          filter(day>=1) %>% 
+          select(spp, source, odate)
+
+
+all_together_now <- alldat %>% 
+                        filter(source!="This Study") %>%
+                        mutate(source="Opportunistic") %>%
+                        bind_rows(alldat)
+
+summary_for_graph <- all_together_now %>%
+                          group_by(source, spp) %>% 
+                          summarize_each(funs(min=min(odate),
+                                              q1=quantile(odate, probs=0.25),
+                                              median=median(odate),
+                                              q3=quantile(odate,probs=0.75), 
+                                              max=max(odate)))
+
+
+#####
+# BNA
+#####
+
+BNA <- data.frame(source="Birds Of \nNorth America", 
+                  spp=c("Virginia Rail","Yellow Rail"),
+                  min=c(227,232) ,
+                  q1=c(258,244) , 
+                  median=c(258,244) , 
+                  q3=c(283,293) , 
+                  max=c(293,314))
+
+
+dt <- bind_rows(summary_for_graph, BNA)
+
+fin_dat <- dt %>%
+          mutate(col=NA,
+                 col = ifelse(spp=="Virginia Rail","V","Y")) %>%
+          mutate(col = ifelse(source=="Birds Of North America","BNA",col)) %>%
+          filter(source!="eBird"&source!="The Bluebird"&source!="Building Strikes")
+
+
+vira <- all_together_now %>%
+            filter(source=="This Study"|source=="Opportunistic",
+                   spp=="Virginia Rail") %>%
+            mutate(source=factor(source, 
+                                 levels=c("This Study","Opportunistic"))) %>%
+            ggplot(aes(x=odate, fill=source))+
+                geom_density(alpha=0.5)+
+                theme_krementz()+
+                theme(legend.position="none",
+                      legend.direction="vertical",
+                      legend.title=element_blank(),
+                      axis.text.x=element_blank(),
+                      axis.title.x=element_blank(),
+                      axis.ticks = element_blank(),
+                      axis.title.y=element_blank())+
+                ylab("Relative Density")+
+                scale_fill_manual(values=c("grey",NA))+
+            ggtitle("Virginia Rail")+
+            xlim(214, 335)
+
+
+vira_bna <- fin_dat %>%
+  filter(spp=="Virginia Rail",
+         source=="Birds Of \nNorth America") %>%
+  ggplot()+
+  geom_boxplot(
+    aes(ymax=max, lower=q1, middle=median, upper=q3,
+        ymin=min, x=source, fill=spp), 
+        color='black', stat="identity", fill="black")+
+  coord_flip()+
+  theme_krementz()+
+  scale_y_continuous(label = function(y) 
+    strftime(chron(y, origin = c(month = 1, day = 1, year = 2016)), 
+             "%b %d"), 
+          breaks=c(214, 228,245,259,275,289,306,320,335,350,365), 
+          limits=c(214, 335))+
+  theme(axis.title.y=element_blank(),
+        legend.position="none",
+        axis.text.x=element_text(ang=90),
+        axis.text.y=element_blank(),
+        axis.ticks = element_blank())
+
+
+##########################
+
+yera <- all_together_now %>%
+  filter(source=="This Study"|source=="Opportunistic",
+         spp=="Yellow Rail") %>%
+  mutate(source=factor(source, levels=c("This Study","Opportunistic"))) %>%
+  ggplot(aes(x=odate, fill=source))+
+  geom_density(alpha=0.5)+theme_krementz()+
+  theme(axis.text.x=element_blank(),
+        axis.title.x=element_blank(),
+        legend.position=c(0.75,0.85),
+        legend.title=element_blank(),
+        legend.direction="vertical",
+        axis.ticks = element_blank(),
+        axis.title.y=element_text(size=15))+
+  scale_fill_manual(values=c("grey",NA))+
+  ylab("Proportion of Total Inidividuals Counted")+
+  ggtitle("Yellow Rail")+
+  xlim(214, 335)
+
+yera_bna <-fin_dat %>%
+          filter(spp=="Yellow Rail",
+                 source=="Birds Of \nNorth America") %>%
+  ggplot()+
+  geom_boxplot(
+    aes(ymax=max, lower=q1, middle=median, upper=q3,
+        ymin=min, x=source, fill=spp), 
+    color='black', stat="identity", fill="black")+
+  coord_flip()+
+  theme_krementz()+
+  theme(axis.title.y=element_blank(),
+        legend.position="none",
+        axis.text.x=element_text(ang=90),
+        axis.text.y=element_text(ang=90, hjust=0.5, size=12),
+        axis.ticks = element_blank())+
+  scale_y_continuous(label = function(y) 
+    strftime(chron(y, origin = c(month = 1, day = 1, year = 2016)), 
+             "%b %d"), 
+              breaks=c(214, 228,245,259,275,289,306,320,335), 
+              limits=c(214, 335))
+
+
+# jpeg(file=paste0(Sys.Date(),"figure_III.jpeg"), height=15, width=15, units="cm", res=600)
+plot_grid(yera, vira, yera_bna, vira_bna, ncol=2, align="v", rel_heights = c(3,1), rel_widths = c(1,1))
+# dev.off()
+
+
+write.csv(all_together_now, file="./master_figure_III.csv", row.names = FALSE)
+
+```
+
